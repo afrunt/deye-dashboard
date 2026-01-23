@@ -56,10 +56,25 @@ class DeyeInverter:
             # Battery
             data["battery_voltage"] = self.read_register(587) / 100
             time.sleep(0.05)
-            raw_current = self.read_register(588)
+            raw_current = self.read_register(586)
             data["battery_current"] = to_signed(raw_current) / 100
             time.sleep(0.05)
-            data["battery_soc"] = self.read_register(589)
+
+            # Calculate SOC from voltage for LiFePO4 16S battery
+            # 56V max, 48V min
+            battery_min_v = 48.0
+            battery_max_v = 56.0
+            voltage = data["battery_voltage"]
+
+            if voltage <= battery_min_v:
+                data["battery_soc"] = 0
+            elif voltage >= battery_max_v:
+                data["battery_soc"] = 100
+            else:
+                data["battery_soc"] = int(((voltage - battery_min_v) / (battery_max_v - battery_min_v)) * 100)
+
+            # Store raw register value for debugging
+            data["battery_soc_raw"] = self.read_register(588)
             time.sleep(0.05)
             data["battery_power"] = int(data["battery_voltage"] * data["battery_current"])
 

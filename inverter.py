@@ -65,6 +65,7 @@ class DeyeInverter:
 
     def connect(self):
         """Establish connection to inverter."""
+        self.disconnect()
         self.inverter = PySolarmanV5(
             address=self.ip,
             serial=self.serial,
@@ -91,12 +92,11 @@ class DeyeInverter:
 
     def _read_all_data_unlocked(self, battery_sampler=None) -> dict:
         """Internal: read all data (caller must hold self.lock)."""
-        if not self.inverter:
-            self.connect()
-
         data = {}
 
         try:
+            if not self.inverter:
+                self.connect()
             # Solar PV
             data["pv1_power"] = self.read_register(514)
             time.sleep(0.05)

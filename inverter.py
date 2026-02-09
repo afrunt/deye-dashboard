@@ -243,6 +243,13 @@ class DeyeInverter:
             if i < 2:
                 time.sleep(2)
 
+        if not has_battery:
+            logger.warning(
+                "detect_config: battery voltage was 0 in all samples "
+                "(may be unreliable during glitches), defaulting to has_battery=True"
+            )
+            has_battery = True
+
         if not pv2_detected:
             logger.warning(
                 "detect_config: PV2 power was 0 in all samples "

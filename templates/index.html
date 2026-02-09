@@ -3119,6 +3119,10 @@
                             document.getElementById('status').textContent = 'Error: ' + data.error;
                             document.getElementById('status').className = 'status error';
                         }
+                        // Apply config even on error so UI elements stay visible
+                        if (data.config) {
+                            applyInverterConfig(data.config);
+                        }
                         return;
                     }
 

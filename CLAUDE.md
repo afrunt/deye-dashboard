@@ -88,6 +88,7 @@ All pollers use thread locks for safe cache access. The inverter connection (`De
 | 607 | Grid Power (signed) | W |
 | 644-646 | Phase Voltages L1-L3 | /10 V |
 | 650-653 | Phase Loads L1-L3, Total Load | W |
+| 667 | Generator Power (GEN/GRID2 port) | W |
 | 540, 541 | DC/Heatsink Temp | (val-1000)/10 C |
 | 502, 520, 521, 526 | Daily PV/Import/Export/Load | /10 kWh |
 
@@ -101,6 +102,7 @@ All pollers use thread locks for safe cache access. The inverter connection (`De
 | 184 | Battery SOC | % |
 | 150 | Grid Voltage | /10 V |
 | 169 | Grid Power (signed) | W |
+| 166 | Generator Power (GEN/GRID2 port) | W |
 | 176, 178 | Load L1, Total Load | W |
 | 90, 91 | DC/Heatsink Temp | (val-1000)/10 C |
 | 108, 76, 77, 84 | Daily PV/Import/Export/Load | /10 kWh |
@@ -114,6 +116,7 @@ All pollers use thread locks for safe cache access. The inverter connection (`De
 | `/api/outage_schedule` | GET | Upcoming outage windows |
 | `/api/phase-stats` | GET | Daily phase statistics |
 | `/api/phase-history` | GET | Phase power history |
+| `/api/generator` | GET | Generator status and runtime |
 | `/api/outages` | GET/POST | Outage history (read/record) |
 | `/api/outages/clear` | POST | Clear outage history |
 | `/api/phase-stats/clear` | POST | Clear phase statistics |

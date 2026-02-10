@@ -14,12 +14,14 @@ class InverterConfig:
     phases: int = 3         # 1 or 3
     has_battery: bool = True
     pv_strings: int = 2     # 1 or 2
+    has_generator: bool = False
 
     def to_dict(self):
         return {
             "phases": self.phases,
             "has_battery": self.has_battery,
             "pv_strings": self.pv_strings,
+            "has_generator": self.has_generator,
         }
 
 
@@ -66,6 +68,7 @@ class DeyeInverter:
     def connect(self):
         """Establish connection to inverter."""
         self.disconnect()
+        logger.info("Connecting to inverter at %s:%d (serial=%d)", self.ip, self.port, self.serial)
         self.inverter = PySolarmanV5(
             address=self.ip,
             serial=self.serial,
@@ -74,10 +77,12 @@ class DeyeInverter:
             verbose=False,
             socket_timeout=10
         )
+        logger.info("Connected to inverter")
 
     def disconnect(self):
         """Close connection."""
         if self.inverter:
+            logger.debug("Disconnecting from inverter")
             self.inverter.disconnect()
             self.inverter = None
 
@@ -173,6 +178,13 @@ class DeyeInverter:
             time.sleep(0.05)
             data["daily_load"] = self.read_register(84) / 10
             time.sleep(0.05)
+
+            # Generator (GEN/GRID2 port) — 1-phase Sunsynk uses register 166
+            if self.config.has_generator:
+                data["generator_power"] = self.read_register(166)
+                time.sleep(0.05)
+            else:
+                data["generator_power"] = 0
 
             # Status indicators
             if self.config.has_battery:
@@ -291,6 +303,13 @@ class DeyeInverter:
                 time.sleep(0.05)
                 data["voltage_l3"] = self.read_register(646) / 10
 
+            # Generator (GEN/GRID2 port) — 3-phase uses register 667
+            if self.config.has_generator:
+                data["generator_power"] = self.read_register(667)
+                time.sleep(0.05)
+            else:
+                data["generator_power"] = 0
+
             # Status indicators
             if self.config.has_battery:
                 if data["battery_current"] > 0:
@@ -310,6 +329,7 @@ class DeyeInverter:
                 data["grid_status"] = "Idle"
 
         except Exception as e:
+            logger.warning("Error reading inverter data: %s", e)
             data["error"] = str(e)
         finally:
             self.disconnect()
@@ -319,36 +339,86 @@ class DeyeInverter:
     def detect_config(self):
         """Auto-detect inverter configuration by reading diagnostic registers.
 
-        Reads L2/L3 voltage, battery voltage, and PV2 power to infer
-        whether the system is 3-phase, has a battery, and has 2 PV strings.
-        Takes 3 samples with 2s delay; any positive reading wins.
+        Two-stage detection:
+        Stage 1 — Read L2/L3 voltage to determine phase count.
+        Stage 2 — Read battery voltage and PV2 power using the register map
+                   appropriate for the detected phase count (3-phase vs Sunsynk).
+        Takes 3 samples per stage with 2s delay; any positive reading wins.
         """
+        # --- Stage 1: detect phase count ---
         phases_3 = False
-        has_battery = False
-        pv2_detected = False
 
         for i in range(3):
-            try:
-                with self.lock:
-                    if not self.inverter:
-                        self.connect()
+            logger.info("detect_config stage 1: taking sample %d/3 (phase detection)", i + 1)
+            with self.lock:
+                if not self.inverter:
+                    self.connect()
+
+                v_l2 = v_l3 = 0
+                try:
                     v_l2 = self.read_register(645) / 10
                     time.sleep(0.05)
                     v_l3 = self.read_register(646) / 10
                     time.sleep(0.05)
-                    bat_v = self.read_register(587) / 100
+                except Exception as e:
+                    logger.info("detect_config stage 1: L2/L3 voltage read failed: %s", e)
+
+            logger.info(
+                "detect_config stage 1: sample %d — v_l2=%.1f v_l3=%.1f",
+                i + 1, v_l2, v_l3,
+            )
+
+            if v_l2 > 50 or v_l3 > 50:
+                phases_3 = True
+
+            if i < 2:
+                time.sleep(2)
+
+        detected_phases = 3 if phases_3 else 1
+        logger.info("detect_config stage 1 result: phases=%d", detected_phases)
+
+        # --- Stage 2: detect battery & PV2 using correct register map ---
+        if detected_phases == 3:
+            bat_reg, pv2_reg = 587, 515
+        else:
+            bat_reg, pv2_reg = 183, 187
+        logger.info(
+            "detect_config stage 2: using %s register map (battery=%d, pv2=%d)",
+            "3-phase" if detected_phases == 3 else "single-phase (Sunsynk)",
+            bat_reg, pv2_reg,
+        )
+
+        has_battery = False
+        pv2_detected = False
+
+        for i in range(3):
+            logger.info("detect_config stage 2: taking sample %d/3 (battery & PV2)", i + 1)
+            with self.lock:
+                if not self.inverter:
+                    self.connect()
+
+                bat_v = 0
+                try:
+                    bat_v = self.read_register(bat_reg) / 100
                     time.sleep(0.05)
-                    pv2_w = self.read_register(515)
+                except Exception as e:
+                    logger.info("detect_config stage 2: battery voltage read failed: %s", e)
 
-                if v_l2 > 50 or v_l3 > 50:
-                    phases_3 = True
-                if bat_v > 10:
-                    has_battery = True
-                if pv2_w > 0:
-                    pv2_detected = True
+                pv2_w = 0
+                try:
+                    pv2_w = self.read_register(pv2_reg)
+                except Exception as e:
+                    logger.info("detect_config stage 2: PV2 power read failed: %s", e)
 
-            except Exception:
-                logger.warning("detect_config: sample %d failed", i + 1)
+            logger.info(
+                "detect_config stage 2: sample %d — bat_v=%.2f (reg %d) pv2_w=%d (reg %d)",
+                i + 1, bat_v, bat_reg, pv2_w, pv2_reg,
+            )
+
+            if bat_v > 10:
+                has_battery = True
+            if pv2_w > 0:
+                pv2_detected = True
 
             if i < 2:
                 time.sleep(2)
@@ -367,10 +437,45 @@ class DeyeInverter:
             )
             pv2_detected = True
 
+        # --- Stage 3: detect generator (GEN/GRID2 port) ---
+        gen_reg = 667 if detected_phases == 3 else 166
+        logger.info(
+            "detect_config stage 3: using register %d for generator detection",
+            gen_reg,
+        )
+
+        has_generator = False
+
+        for i in range(3):
+            logger.info("detect_config stage 3: taking sample %d/3 (generator)", i + 1)
+            with self.lock:
+                if not self.inverter:
+                    self.connect()
+
+                gen_w = 0
+                try:
+                    gen_w = self.read_register(gen_reg)
+                except Exception as e:
+                    logger.info("detect_config stage 3: generator read failed: %s", e)
+
+            logger.info(
+                "detect_config stage 3: sample %d — gen_w=%d (reg %d)",
+                i + 1, gen_w, gen_reg,
+            )
+
+            if gen_w > 0:
+                has_generator = True
+
+            if i < 2:
+                time.sleep(2)
+
+        logger.info("detect_config stage 3 result: has_generator=%s", has_generator)
+
         config = InverterConfig(
-            phases=3 if phases_3 else 1,
+            phases=detected_phases,
             has_battery=has_battery,
             pv_strings=2 if pv2_detected else 1,
+            has_generator=has_generator,
         )
         logger.info("Auto-detected inverter config: %s", config)
         return config
@@ -404,8 +509,8 @@ class BatterySampler:
                 raw_soc = self.inverter.read_register(reg_soc)
                 self.inverter.disconnect()
             voltage = raw_v / 100
-        except Exception:
-            logger.debug("BatterySampler: failed to read battery registers")
+        except Exception as e:
+            logger.warning("BatterySampler: failed to read battery registers: %s", e)
             return
 
         with self._lock:

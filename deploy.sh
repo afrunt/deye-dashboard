@@ -26,119 +26,19 @@ ask() {
 
 # Interactive setup when .env doesn't exist
 if [ ! -f .env ]; then
-    echo ""
-    echo -e "${CYAN}${BOLD}========================================${NC}"
-    echo -e "${CYAN}${BOLD}  Deye Dashboard — First-Time Setup${NC}"
-    echo -e "${CYAN}${BOLD}========================================${NC}"
-    echo ""
-    echo "No .env file found. Let's configure your deployment."
-    echo "Press Enter to accept defaults shown in [brackets]."
-    echo ""
+    python3 setup.py
+    if [ $? -ne 0 ] || [ ! -f .env ]; then
+        echo -e "${RED}Setup cancelled or failed.${NC}"
+        exit 1
+    fi
 
-    # --- Inverter ---
-    echo -e "${YELLOW}Inverter Settings${NC}"
-    ask INVERTER_IP "Inverter IP address" ""
-    ask LOGGER_SERIAL "Logger serial number" ""
-    echo ""
-
-    # --- Deployment ---
+    # Ask deployment-specific questions and append to .env
     echo -e "${YELLOW}Deployment Settings${NC}"
     ask DEPLOY_HOST "Remote host (IP or hostname)" ""
     ask DEPLOY_USER "Remote SSH user" ""
     ask DEPLOY_DIR "Remote install directory" "/home/${DEPLOY_USER}/deye-dashboard"
     ask DEPLOY_SERVICE_NAME "Systemd service name" "deye-dashboard"
     echo ""
-
-    # --- Weather ---
-    echo -e "${YELLOW}Weather Settings (Open-Meteo API)${NC}"
-    ask WEATHER_LATITUDE "Latitude" "50.4501"
-    ask WEATHER_LONGITUDE "Longitude" "30.5234"
-    echo ""
-
-    # --- Outage Provider ---
-    echo -e "${YELLOW}Outage Schedule Provider${NC}"
-    echo "  1) lvivoblenergo"
-    echo "  2) yasno"
-    echo "  3) none (disable)"
-    read -rp "  Choose [1]: " OUTAGE_CHOICE
-    OUTAGE_CHOICE="${OUTAGE_CHOICE:-1}"
-
-    case "$OUTAGE_CHOICE" in
-        1)
-            OUTAGE_PROVIDER="lvivoblenergo"
-            ask OUTAGE_GROUP "Outage group (e.g. 1.1)" "1.1"
-            ;;
-        2)
-            OUTAGE_PROVIDER="yasno"
-            ask OUTAGE_REGION_ID "YASNO region ID (e.g. 25 = Kyiv)" "25"
-            ask OUTAGE_DSO_ID "YASNO DSO ID (e.g. 902 = DTEK Kyiv)" "902"
-            ask OUTAGE_GROUP "Queue/group number (e.g. 2.1)" "2.1"
-            ;;
-        3)
-            OUTAGE_PROVIDER="none"
-            ;;
-        *)
-            echo -e "${RED}Invalid choice, defaulting to lvivoblenergo${NC}"
-            OUTAGE_PROVIDER="lvivoblenergo"
-            ask OUTAGE_GROUP "Outage group (e.g. 1.1)" "1.1"
-            ;;
-    esac
-    echo ""
-
-    # --- Telegram ---
-    echo -e "${YELLOW}Telegram Bot (optional)${NC}"
-    read -rp "  Enable Telegram bot? (y/n) [n]: " TELEGRAM_CHOICE
-    TELEGRAM_CHOICE="${TELEGRAM_CHOICE:-n}"
-
-    if [[ "$TELEGRAM_CHOICE" =~ ^[Yy]$ ]]; then
-        TELEGRAM_ENABLED="true"
-        ask TELEGRAM_BOT_TOKEN "Bot token" ""
-        ask TELEGRAM_ALLOWED_USERS "Allowed user IDs (comma-separated)" ""
-    else
-        TELEGRAM_ENABLED="false"
-    fi
-    echo ""
-
-    # --- Write .env ---
-    echo -e "${YELLOW}Writing .env file...${NC}"
-    cat > .env << EOF
-# Deye Inverter Configuration
-INVERTER_IP=${INVERTER_IP}
-LOGGER_SERIAL=${LOGGER_SERIAL}
-
-# Weather (coordinates for Open-Meteo API)
-WEATHER_LATITUDE=${WEATHER_LATITUDE}
-WEATHER_LONGITUDE=${WEATHER_LONGITUDE}
-
-# Outage Schedule Provider
-OUTAGE_PROVIDER=${OUTAGE_PROVIDER}
-EOF
-
-    # Add provider-specific vars
-    if [ "$OUTAGE_PROVIDER" = "yasno" ]; then
-        cat >> .env << EOF
-OUTAGE_REGION_ID=${OUTAGE_REGION_ID}
-OUTAGE_DSO_ID=${OUTAGE_DSO_ID}
-OUTAGE_GROUP=${OUTAGE_GROUP}
-EOF
-    elif [ "$OUTAGE_PROVIDER" = "lvivoblenergo" ]; then
-        cat >> .env << EOF
-OUTAGE_GROUP=${OUTAGE_GROUP}
-EOF
-    fi
-
-    cat >> .env << EOF
-
-# Telegram Bot
-TELEGRAM_ENABLED=${TELEGRAM_ENABLED}
-EOF
-
-    if [ "$TELEGRAM_ENABLED" = "true" ]; then
-        cat >> .env << EOF
-TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}
-EOF
-    fi
 
     cat >> .env << EOF
 
@@ -149,14 +49,7 @@ DEPLOY_DIR=${DEPLOY_DIR}
 DEPLOY_SERVICE_NAME=${DEPLOY_SERVICE_NAME}
 EOF
 
-    echo -e "${GREEN}.env file created successfully!${NC}"
-    echo ""
-    echo -e "${CYAN}Summary:${NC}"
-    echo "  Inverter:  ${INVERTER_IP} (serial: ${LOGGER_SERIAL})"
-    echo "  Deploy to: ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}"
-    echo "  Weather:   ${WEATHER_LATITUDE}, ${WEATHER_LONGITUDE}"
-    echo "  Outage:    ${OUTAGE_PROVIDER}"
-    echo "  Telegram:  ${TELEGRAM_ENABLED}"
+    echo -e "${GREEN}Deployment settings added to .env${NC}"
     echo ""
     read -rp "Proceed with deployment? (y/n) [y]: " PROCEED
     PROCEED="${PROCEED:-y}"
@@ -187,7 +80,9 @@ MISSING=()
 
 if [ "${TELEGRAM_ENABLED:-false}" = "true" ]; then
     [ -z "$TELEGRAM_BOT_TOKEN" ] && MISSING+=("TELEGRAM_BOT_TOKEN")
-    [ -z "$TELEGRAM_ALLOWED_USERS" ] && MISSING+=("TELEGRAM_ALLOWED_USERS")
+    if [ "${TELEGRAM_PUBLIC:-false}" != "true" ]; then
+        [ -z "$TELEGRAM_ALLOWED_USERS" ] && MISSING+=("TELEGRAM_ALLOWED_USERS")
+    fi
 fi
 
 if [ ${#MISSING[@]} -gt 0 ]; then
@@ -214,6 +109,7 @@ FILES=(
     "templates"
     "discover_inverter.py"
     "check_inverter.py"
+    "setup.py"
     ".env"
 )
 

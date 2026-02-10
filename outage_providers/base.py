@@ -12,6 +12,8 @@ BATTERY_CAPACITY_KWH = 16.0
 class OutageProvider:
     """Base class for outage schedule providers."""
 
+    display_name = "енергопостачальник"
+
     def fetch_windows(self):
         """Return list of (start_h, start_m, end_h, end_m) for today.
 
@@ -64,14 +66,16 @@ class OutageSchedulePoller:
 
     def _fetch_schedule(self):
         """Fetch and parse the schedule from the provider."""
+        provider_name = type(self.provider).__name__
+        logger.info("Fetching outage schedule from %s", provider_name)
         try:
             windows = self.provider.fetch_windows()
             with self._lock:
                 self._windows = windows
                 self._last_updated = datetime.now()
-            logger.info("Outage schedule updated: %s", windows)
+            logger.info("Outage schedule updated: %d windows %s", len(windows), windows)
         except Exception:
-            logger.exception("Error fetching outage schedule")
+            logger.exception("Error fetching outage schedule from %s", provider_name)
 
     def get_outage_status(self):
         """Return current outage status.

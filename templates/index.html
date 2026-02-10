@@ -223,6 +223,91 @@
             margin-top: 2px;
         }
 
+        /* Generator Status Banner */
+        .generator-status-banner {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 16px 24px;
+            flex: 1;
+            min-width: 280px;
+            max-width: 350px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .generator-visible .generator-status-banner {
+            display: flex;
+        }
+
+        .generator-status-banner.generator-running {
+            border-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.1);
+            box-shadow: 0 0 30px rgba(245, 158, 11, 0.2);
+        }
+
+        .generator-status-banner.generator-off {
+            border-color: #64748b;
+            background: rgba(100, 116, 139, 0.1);
+        }
+
+        .generator-banner-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .generator-banner-icon {
+            font-size: 2rem;
+        }
+
+        .generator-banner-text {
+            flex: 1;
+        }
+
+        .generator-banner-label {
+            font-size: 0.8rem;
+            color: #94a3b8;
+        }
+
+        .generator-banner-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+        }
+
+        .generator-status-banner.generator-running .generator-banner-value {
+            color: #f59e0b;
+        }
+
+        .generator-status-banner.generator-off .generator-banner-value {
+            color: #64748b;
+        }
+
+        .generator-banner-status {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        /* Generator Card */
+        #generator-card {
+            display: none;
+        }
+
+        #generator-card.generator-card-visible {
+            display: block;
+        }
+
+        #generator-card.generator-active {
+            border-color: rgba(245, 158, 11, 0.4);
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.15);
+        }
+
         .grid-status-banner.online {
             background: rgba(110, 200, 155, 0.1);
             border-color: #6ec89b;
@@ -1044,6 +1129,14 @@
             box-sizing: border-box;
         }
 
+        /* 3-column layout when generator is present */
+        body.fullscreen-mode.has-generator .fullscreen-banner-wrapper {
+            grid-template-areas:
+                "weather   weather   weather"
+                "grid      battery   generator";
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+
         body.fullscreen-mode .weather-forecast-banner {
             grid-area: weather;
         }
@@ -1053,7 +1146,8 @@
         }
 
         body.fullscreen-mode .grid-status-banner,
-        body.fullscreen-mode .battery-status-banner {
+        body.fullscreen-mode .battery-status-banner,
+        body.fullscreen-mode .generator-status-banner {
             align-self: stretch;
             max-width: 500px;
             width: 100%;
@@ -1072,23 +1166,40 @@
             justify-self: start;
         }
 
+        body.fullscreen-mode .generator-status-banner {
+            grid-area: generator;
+            justify-self: start;
+        }
+
+        body.fullscreen-mode.has-generator .grid-status-banner {
+            justify-self: center;
+        }
+
+        body.fullscreen-mode.has-generator .battery-status-banner {
+            justify-self: center;
+        }
+
         body.fullscreen-mode .grid-status-icon,
-        body.fullscreen-mode .battery-banner-icon {
+        body.fullscreen-mode .battery-banner-icon,
+        body.fullscreen-mode .generator-banner-icon {
             font-size: 3.5rem;
         }
 
         body.fullscreen-mode .grid-status-value,
-        body.fullscreen-mode .battery-banner-value {
+        body.fullscreen-mode .battery-banner-value,
+        body.fullscreen-mode .generator-banner-value {
             font-size: 3rem;
         }
 
         body.fullscreen-mode .grid-status-label,
-        body.fullscreen-mode .battery-banner-label {
+        body.fullscreen-mode .battery-banner-label,
+        body.fullscreen-mode .generator-banner-label {
             font-size: 1rem;
         }
 
         body.fullscreen-mode .grid-outage-info,
-        body.fullscreen-mode .battery-banner-status {
+        body.fullscreen-mode .battery-banner-status,
+        body.fullscreen-mode .generator-banner-status {
             font-size: 1rem;
             order: 1;
             margin-bottom: 12px;
@@ -2269,6 +2380,18 @@
                 </div>
                 <div class="battery-banner-status" id="battery-banner-status">--</div>
             </div>
+
+            <!-- Generator Status Banner -->
+            <div class="generator-status-banner generator-off" id="generator-banner">
+                <div class="generator-banner-header">
+                    <div class="generator-banner-icon">&#9981;</div>
+                    <div class="generator-banner-text">
+                        <div class="generator-banner-label">Generator</div>
+                        <div class="generator-banner-value" id="generator-banner-value">OFF</div>
+                    </div>
+                </div>
+                <div class="generator-banner-status" id="generator-banner-status">--</div>
+            </div>
         </div>
         <!-- Scroll hint for fullscreen mode -->
         <button class="scroll-hint" onclick="document.querySelector('.dashboard').scrollIntoView({behavior:'smooth'})" title="Scroll to details">
@@ -2356,6 +2479,42 @@
                     <div class="value" id="daily-export">--</div>
                     <div class="label">Export (kWh)</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Generator -->
+        <div class="card" id="generator-card">
+            <div class="card-header">
+                <span class="icon">&#9981;</span>
+                <h2>Generator</h2>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Generator Power</div>
+                <div class="metric-value" id="generator-power">--<span class="unit">W</span></div>
+            </div>
+            <div class="stats-row">
+                <div class="stat">
+                    <div class="value" id="generator-today-runtime">--</div>
+                    <div class="label">Today Runtime (h)</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="generator-monthly-runtime">--</div>
+                    <div class="label">Monthly Runtime (h)</div>
+                </div>
+            </div>
+            <div class="stats-row" id="generator-fuel-row" style="display: none; margin-top: 16px;">
+                <div class="stat">
+                    <div class="value" id="generator-fuel-today">--</div>
+                    <div class="label">Fuel Today (L)</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="generator-fuel-monthly">--</div>
+                    <div class="label">Fuel This Month (L)</div>
+                </div>
+            </div>
+            <div class="stat" id="generator-oil-row" style="display: none; margin-top: 16px;">
+                <div class="value" id="generator-oil-hours">--</div>
+                <div class="label">Hours Since Oil Change</div>
             </div>
         </div>
 
@@ -2545,6 +2704,15 @@
             <div class="debug-info" id="debug-outage-mode">Mode: auto</div>
         </div>
 
+        <div class="debug-section" id="debug-generator-section" style="display: none;">
+            <label>Generator Override</label>
+            <button class="debug-btn" onclick="debugGeneratorOverride('reset')">Auto (reset)</button>
+            <button class="debug-btn" onclick="debugGeneratorOverride(3000)">Generator ON 3000W</button>
+            <button class="debug-btn" onclick="debugGeneratorOverride(5000)">Generator ON 5000W</button>
+            <button class="debug-btn" onclick="debugGeneratorOverride(0)">Generator OFF</button>
+            <div class="debug-info" id="debug-generator-mode">Mode: auto</div>
+        </div>
+
         <div class="debug-section">
             <label>Last API Response</label>
             <div class="debug-info" id="debug-last-data">No data yet</div>
@@ -2580,6 +2748,7 @@
         var inverterConfig = null;
         var outageScheduleIntervalId = null;
         var outageInfoIntervalId = null;
+        var gridProgressBarIntervalId = null;
 
         function applyInverterConfig(config) {
             if (!config || inverterConfig) return; // apply once
@@ -2623,6 +2792,30 @@
                 if (outageInfoIntervalId) {
                     clearInterval(outageInfoIntervalId);
                     outageInfoIntervalId = null;
+                }
+                // Hide grid progress bar and stop its interval
+                var gridBannerBar = document.getElementById('grid-banner-bar');
+                if (gridBannerBar) gridBannerBar.style.display = 'none';
+                if (gridProgressBarIntervalId) {
+                    clearInterval(gridProgressBarIntervalId);
+                    gridProgressBarIntervalId = null;
+                }
+            }
+
+            // Generator support
+            if (config.has_generator === true) {
+                document.body.classList.add('generator-visible', 'has-generator');
+                var debugGenSection = document.getElementById('debug-generator-section');
+                if (debugGenSection) debugGenSection.style.display = '';
+                fetchGeneratorData();
+                generatorIntervalId = setInterval(fetchGeneratorData, 30000);
+            } else {
+                document.body.classList.remove('generator-visible', 'has-generator');
+                var debugGenSection = document.getElementById('debug-generator-section');
+                if (debugGenSection) debugGenSection.style.display = 'none';
+                if (generatorIntervalId) {
+                    clearInterval(generatorIntervalId);
+                    generatorIntervalId = null;
                 }
             }
         }
@@ -3255,6 +3448,19 @@
                         updateBatteryBanner(data);
                     }
 
+                    // Update generator power from real-time inverter data
+                    if (inverterConfig && inverterConfig.has_generator && generatorOverridePower === null) {
+                        var genPower = data.generator_power || 0;
+                        var genPowerEl = document.getElementById('generator-power');
+                        if (genPowerEl) genPowerEl.innerHTML = genPower + '<span class="unit">W</span>';
+                        // Update banner with real-time power
+                        if (generatorData) {
+                            generatorData.power = genPower;
+                            generatorData.running = genPower > 0;
+                        }
+                        updateGeneratorBanner(generatorData || {power: genPower, today_runtime_hours: 0});
+                    }
+
                     // Update energy flow diagram
                     updateEnergyFlow(data);
 
@@ -3287,6 +3493,11 @@
         var latestInverterData = null;
         var outageScheduleData = null;
         var outageOverrideData = null;
+
+        // Generator data
+        var generatorOverridePower = null;
+        var generatorData = null;
+        var generatorIntervalId = null;
 
         function fetchOutageSchedule() {
             if (outageOverrideData) return;
@@ -3419,7 +3630,7 @@
             fill.style.width = remaining + '%';
         }
 
-        setInterval(updateGridProgressBar, 1000);
+        gridProgressBarIntervalId = setInterval(updateGridProgressBar, 1000);
 
         // ===== WEATHER BACKGROUND =====
 
@@ -3669,6 +3880,135 @@
             var opacity = Math.min(((50 - soc) / 50) * 0.5 + 0.1, 0.6);
             if (opacity < 0) opacity = 0;
             overlay.style.background = 'rgba(120, 15, 15, ' + opacity.toFixed(3) + ')';
+        }
+
+        // ===== GENERATOR =====
+        function fetchGeneratorData() {
+            if (generatorOverridePower !== null) return;
+            fetch('/api/generator')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    generatorData = data;
+                    updateGeneratorBanner(data);
+                    updateGeneratorCard(data);
+                })
+                .catch(function() { generatorData = null; });
+        }
+
+        function updateGeneratorBanner(data) {
+            var banner = document.getElementById('generator-banner');
+            var valueEl = document.getElementById('generator-banner-value');
+            var statusEl = document.getElementById('generator-banner-status');
+            if (!banner || !valueEl || !statusEl) return;
+
+            var power = generatorOverridePower !== null ? generatorOverridePower : (data && data.power || 0);
+            var running = power > 0;
+
+            banner.classList.remove('generator-running', 'generator-off');
+            if (running) {
+                banner.classList.add('generator-running');
+                valueEl.textContent = power + 'W';
+                var hours = data ? data.today_runtime_hours : 0;
+                statusEl.textContent = 'Runtime: ' + hours.toFixed(1) + 'h today';
+            } else {
+                banner.classList.add('generator-off');
+                valueEl.textContent = 'OFF';
+                statusEl.textContent = 'Standby';
+            }
+        }
+
+        function updateGeneratorCard(data) {
+            var card = document.getElementById('generator-card');
+            if (!card) return;
+
+            var power = generatorOverridePower !== null ? generatorOverridePower : (data && data.power || 0);
+            var running = power > 0;
+            var todayHours = data ? data.today_runtime_hours : 0;
+
+            // Show card when running or has runtime today
+            if (running || todayHours > 0) {
+                card.classList.add('generator-card-visible');
+            } else {
+                card.classList.remove('generator-card-visible');
+            }
+
+            // Active state styling
+            if (running) {
+                card.classList.add('generator-active');
+            } else {
+                card.classList.remove('generator-active');
+            }
+
+            var powerEl = document.getElementById('generator-power');
+            if (powerEl) powerEl.innerHTML = power + '<span class="unit">W</span>';
+
+            var todayEl = document.getElementById('generator-today-runtime');
+            if (todayEl) todayEl.textContent = data ? data.today_runtime_hours.toFixed(1) : '--';
+
+            var monthlyEl = document.getElementById('generator-monthly-runtime');
+            if (monthlyEl) monthlyEl.textContent = data ? data.monthly_runtime_hours.toFixed(1) : '--';
+
+            // Fuel row
+            var fuelRow = document.getElementById('generator-fuel-row');
+            if (fuelRow && data) {
+                if (data.fuel_rate && data.fuel_rate > 0) {
+                    fuelRow.style.display = '';
+                    var fuelTodayEl = document.getElementById('generator-fuel-today');
+                    if (fuelTodayEl) fuelTodayEl.textContent = data.fuel_today_liters != null ? data.fuel_today_liters.toFixed(1) : '--';
+                    var fuelMonthlyEl = document.getElementById('generator-fuel-monthly');
+                    if (fuelMonthlyEl) fuelMonthlyEl.textContent = data.fuel_monthly_liters != null ? data.fuel_monthly_liters.toFixed(1) : '--';
+                } else {
+                    fuelRow.style.display = 'none';
+                }
+            }
+
+            // Oil change row
+            var oilRow = document.getElementById('generator-oil-row');
+            if (oilRow && data) {
+                if (data.oil_change_date) {
+                    oilRow.style.display = '';
+                    var oilEl = document.getElementById('generator-oil-hours');
+                    if (oilEl) oilEl.textContent = data.oil_change_hours_since != null ? data.oil_change_hours_since.toFixed(1) : '--';
+                } else {
+                    oilRow.style.display = 'none';
+                }
+            }
+        }
+
+        function debugGeneratorOverride(mode) {
+            var debugEl = document.getElementById('debug-generator-mode');
+            if (mode === 'reset') {
+                generatorOverridePower = null;
+                if (debugEl) debugEl.textContent = 'Mode: auto';
+                fetchGeneratorData();
+                return;
+            }
+            generatorOverridePower = mode; // 0, 3000, or 5000
+            if (debugEl) debugEl.textContent = 'Mode: ' + (mode > 0 ? mode + 'W' : 'OFF');
+
+            // Create fake data for display
+            var fakeData = {
+                enabled: true,
+                running: mode > 0,
+                power: mode,
+                today_runtime_hours: mode > 0 ? 2.5 : 0,
+                today_sessions: [],
+                monthly_runtime_hours: mode > 0 ? 15.3 : 0,
+                fuel_rate: 2.5,
+                fuel_today_liters: mode > 0 ? 6.3 : 0,
+                fuel_monthly_liters: mode > 0 ? 38.3 : 0,
+                oil_change_date: '2025-01-15',
+                oil_change_hours_since: mode > 0 ? 42.5 : 40.0,
+            };
+            generatorData = fakeData;
+
+            // Force card + banner visible
+            document.body.classList.add('generator-visible', 'has-generator');
+            var card = document.getElementById('generator-card');
+            if (card) card.classList.add('generator-card-visible');
+
+            updateGeneratorBanner(fakeData);
+            updateGeneratorCard(fakeData);
         }
 
         // Debug: simulate outage schedule override

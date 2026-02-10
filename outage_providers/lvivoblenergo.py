@@ -59,25 +59,33 @@ def parse_group_windows(html, group):
 class LvivoblenergoProvider(OutageProvider):
     """Outage schedule provider for Lvivoblenergo (LOE)."""
 
+    display_name = "Львівобленерго"
+
     def __init__(self, group=None):
         self.group = group or os.environ.get("OUTAGE_GROUP", DEFAULT_GROUP)
         self.api_url = SCHEDULE_API_URL
 
     def fetch_windows(self):
         """Fetch today's outage windows from the Lvivoblenergo API."""
+        logger.info("Lvivoblenergo: fetching %s (group=%s)", self.api_url, self.group)
         resp = requests.get(self.api_url, timeout=15)
         if not resp.ok:
-            logger.warning("Outage API returned %s", resp.status_code)
+            body_snippet = resp.text[:200] if resp.text else "(empty)"
+            logger.warning("Lvivoblenergo API returned %s: %s", resp.status_code, body_snippet)
             return []
 
         data = resp.json()
         members = data.get("hydra:member", [])
         if not members:
+            logger.warning("Lvivoblenergo: no hydra:member entries in response")
             return []
 
         for item in members[0].get("menuItems", []):
             if item.get("name") == "Today":
                 html = item.get("rawHtml", "")
-                return parse_group_windows(html, self.group)
+                windows = parse_group_windows(html, self.group)
+                logger.info("Lvivoblenergo: found %d windows for group %s", len(windows), self.group)
+                return windows
 
+        logger.warning("Lvivoblenergo: no 'Today' menu item found in response")
         return []

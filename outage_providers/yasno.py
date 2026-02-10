@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 class YasnoProvider(OutageProvider):
     """Outage schedule provider for YASNO (DTEK regions)."""
 
+    display_name = "YASNO"
+
     API_URL_TEMPLATE = (
         "https://app.yasno.ua/api/blackout-service/public/shutdowns"
         "/regions/{region_id}/dsos/{dso_id}/planned-outages"
@@ -27,13 +29,19 @@ class YasnoProvider(OutageProvider):
         url = self.API_URL_TEMPLATE.format(
             region_id=self.region_id, dso_id=self.dso_id
         )
+        logger.info("YASNO: fetching %s (group=%s)", url, self.group)
         resp = requests.get(url, timeout=15)
         if not resp.ok:
-            logger.warning("YASNO API returned %s", resp.status_code)
+            body_snippet = resp.text[:200] if resp.text else "(empty)"
+            logger.warning("YASNO API returned %s: %s", resp.status_code, body_snippet)
             return []
 
         data = resp.json()
         group_data = data.get(self.group, {})
+        if not group_data:
+            logger.warning("YASNO: group '%s' not found in response (available: %s)",
+                           self.group, list(data.keys())[:10])
+
         today = group_data.get("today", {})
         slots = today.get("slots", [])
 
@@ -44,4 +52,5 @@ class YasnoProvider(OutageProvider):
             sh, sm = divmod(slot["start"], 60)
             eh, em = divmod(slot["end"], 60)
             windows.append((sh, sm, eh, em))
+        logger.info("YASNO: found %d windows for group %s", len(windows), self.group)
         return windows

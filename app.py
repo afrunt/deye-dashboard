@@ -60,6 +60,7 @@ class WeatherPoller:
             }
             with self._lock:
                 self._cache = result
+            logger.info("Weather updated: %.1f°C code=%s", result.get("temperature", 0), result.get("weather_code"))
         except Exception:
             logger.exception("Error fetching weather data")
 
@@ -128,9 +129,21 @@ class InverterPoller:
 
     def _fetch(self):
         try:
+            t0 = time.time()
             result = self.inverter.read_all_data(
                 battery_sampler=self.battery_sampler
             )
+            elapsed = time.time() - t0
+
+            if result.get("error"):
+                logger.warning("Inverter poll returned error after %.1fs: %s", elapsed, result["error"])
+            else:
+                logger.info("Inverter poll OK in %.1fs (PV=%dW load=%dW grid=%dW)",
+                            elapsed,
+                            result.get("pv_total_power", 0),
+                            result.get("load_power", 0),
+                            result.get("grid_power", 0))
+
             result["last_updated"] = datetime.now().isoformat()
             with self._lock:
                 self._cache = result
@@ -139,6 +152,10 @@ class InverterPoller:
             # Record daily grid import for monthly totals
             if "daily_grid_import" in result:
                 record_grid_daily_import(result["daily_grid_import"])
+
+            # Track generator runtime
+            if inverter_config.has_generator and "generator_power" in result:
+                track_generator_runtime(result["generator_power"])
 
             # Record phase sample for analytics (only for 3-phase)
             if "load_l1" in result and inverter_config.phases == 3:
@@ -174,6 +191,9 @@ OUTAGE_HISTORY_FILE = os.environ.get("OUTAGE_HISTORY_FILE", "outage_history.json
 PHASE_STATS_FILE = os.environ.get("PHASE_STATS_FILE", "phase_stats.json")
 PHASE_HISTORY_FILE = os.environ.get("PHASE_HISTORY_FILE", "phase_history.json")
 GRID_DAILY_LOG_FILE = os.environ.get("GRID_DAILY_LOG_FILE", "grid_daily_log.json")
+GENERATOR_LOG_FILE = os.environ.get("GENERATOR_LOG_FILE", "generator_log.json")
+GENERATOR_FUEL_RATE = float(os.environ.get("GENERATOR_FUEL_RATE", "0"))
+GENERATOR_OIL_CHANGE_DATE = os.environ.get("GENERATOR_OIL_CHANGE_DATE", "")
 
 
 def build_inverter_config(inv):
@@ -181,12 +201,14 @@ def build_inverter_config(inv):
     env_phases = os.environ.get("INVERTER_PHASES")
     env_battery = os.environ.get("INVERTER_HAS_BATTERY")
     env_pv = os.environ.get("INVERTER_PV_STRINGS")
+    env_generator = os.environ.get("INVERTER_HAS_GENERATOR")
 
-    if env_phases and env_battery and env_pv:
+    if env_phases and env_battery and env_pv and env_generator:
         return InverterConfig(
             phases=int(env_phases),
             has_battery=env_battery.lower() in ("true", "1", "yes"),
             pv_strings=int(env_pv),
+            has_generator=env_generator.lower() in ("true", "1", "yes"),
         )
 
     # Auto-detect missing values
@@ -201,6 +223,8 @@ def build_inverter_config(inv):
         has_battery=(env_battery.lower() in ("true", "1", "yes"))
             if env_battery else detected.has_battery,
         pv_strings=int(env_pv) if env_pv else detected.pv_strings,
+        has_generator=(env_generator.lower() in ("true", "1", "yes"))
+            if env_generator else detected.has_generator,
     )
 
 
@@ -264,6 +288,66 @@ def record_grid_daily_import(daily_kwh):
         for old_date in sorted_dates[90:]:
             del log[old_date]
     save_grid_daily_log(log)
+
+
+def load_generator_log():
+    """Load generator runtime log from file."""
+    if os.path.exists(GENERATOR_LOG_FILE):
+        with open(GENERATOR_LOG_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_generator_log(log):
+    """Save generator runtime log to file."""
+    with open(GENERATOR_LOG_FILE, "w") as f:
+        json.dump(log, f, indent=2)
+
+
+# Generator runtime tracking state
+generator_last_running = None
+generator_session_start = None
+
+
+def track_generator_runtime(generator_power):
+    """Track generator runtime based on power readings."""
+    global generator_last_running, generator_session_start
+
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    running = generator_power > 0
+
+    log = load_generator_log()
+
+    if today not in log:
+        log[today] = {"runtime_seconds": 0, "sessions": []}
+
+    if running and not generator_last_running:
+        # Transition: off → on — start new session
+        generator_session_start = now
+        log[today]["sessions"].append({
+            "start": now.strftime("%H:%M:%S"),
+            "end": None,
+        })
+    elif not running and generator_last_running:
+        # Transition: on → off — close session
+        if generator_session_start:
+            elapsed = (now - generator_session_start).total_seconds()
+            log[today]["runtime_seconds"] += int(elapsed)
+            # Close the last open session
+            if log[today]["sessions"] and log[today]["sessions"][-1]["end"] is None:
+                log[today]["sessions"][-1]["end"] = now.strftime("%H:%M:%S")
+        generator_session_start = None
+
+    generator_last_running = running
+
+    # Keep only last 90 days
+    sorted_dates = sorted(log.keys(), reverse=True)
+    if len(sorted_dates) > 90:
+        for old_date in sorted_dates[90:]:
+            del log[old_date]
+
+    save_generator_log(log)
 
 
 def load_outage_history():
@@ -548,6 +632,79 @@ def get_weather():
     return jsonify(data)
 
 
+@app.route("/api/generator")
+def get_generator():
+    """Get generator status and runtime data."""
+    if not inverter_config.has_generator:
+        return jsonify({"enabled": False})
+
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    log = load_generator_log()
+
+    # Current power from inverter poller
+    inv_data = inverter_poller.data
+    power = inv_data.get("generator_power", 0) if inv_data else 0
+    running = power > 0
+
+    # Today's runtime (account for currently-running session)
+    today_entry = log.get(today, {"runtime_seconds": 0, "sessions": []})
+    today_seconds = today_entry["runtime_seconds"]
+    if running and generator_session_start:
+        today_seconds += int((now - generator_session_start).total_seconds())
+    today_hours = round(today_seconds / 3600, 2)
+
+    # Monthly runtime
+    month_prefix = now.strftime("%Y-%m")
+    monthly_seconds = 0
+    for day_key, day_data in log.items():
+        if day_key.startswith(month_prefix):
+            monthly_seconds += day_data.get("runtime_seconds", 0)
+    if running and generator_session_start:
+        monthly_seconds += int((now - generator_session_start).total_seconds())
+    monthly_hours = round(monthly_seconds / 3600, 2)
+
+    result = {
+        "enabled": True,
+        "running": running,
+        "power": power,
+        "today_runtime_hours": today_hours,
+        "today_sessions": today_entry.get("sessions", []),
+        "monthly_runtime_hours": monthly_hours,
+    }
+
+    # Fuel estimates
+    if GENERATOR_FUEL_RATE > 0:
+        result["fuel_rate"] = GENERATOR_FUEL_RATE
+        result["fuel_today_liters"] = round(today_hours * GENERATOR_FUEL_RATE, 2)
+        result["fuel_monthly_liters"] = round(monthly_hours * GENERATOR_FUEL_RATE, 2)
+    else:
+        result["fuel_rate"] = None
+        result["fuel_today_liters"] = None
+        result["fuel_monthly_liters"] = None
+
+    # Oil change tracking
+    if GENERATOR_OIL_CHANGE_DATE:
+        result["oil_change_date"] = GENERATOR_OIL_CHANGE_DATE
+        try:
+            oil_date = datetime.strptime(GENERATOR_OIL_CHANGE_DATE, "%Y-%m-%d")
+            # Sum all runtime hours since oil change date
+            oil_hours = 0
+            for day_key, day_data in log.items():
+                if day_key >= GENERATOR_OIL_CHANGE_DATE:
+                    oil_hours += day_data.get("runtime_seconds", 0) / 3600
+            if running and generator_session_start:
+                oil_hours += (now - generator_session_start).total_seconds() / 3600
+            result["oil_change_hours_since"] = round(oil_hours, 1)
+        except ValueError:
+            result["oil_change_hours_since"] = None
+    else:
+        result["oil_change_date"] = None
+        result["oil_change_hours_since"] = None
+
+    return jsonify(result)
+
+
 def start_telegram_bot():
     """Start the Telegram bot in a background thread if configured."""
     if os.environ.get("TELEGRAM_ENABLED", "true").lower() == "false":
@@ -556,6 +713,7 @@ def start_telegram_bot():
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     allowed = os.environ.get("TELEGRAM_ALLOWED_USERS", "")
+    is_public = os.environ.get("TELEGRAM_PUBLIC", "false").lower() in ("true", "1", "yes")
 
     if not token:
         logging.info("TELEGRAM_BOT_TOKEN not set, Telegram bot disabled")
@@ -574,14 +732,31 @@ def start_telegram_bot():
         state_file=state_file,
         grid_daily_log_file=GRID_DAILY_LOG_FILE,
         weather_poller=weather_poller,
+        is_public=is_public,
     )
     bot.start(inverter_interval=120)
-    logging.info("Telegram bot started with %d allowed users", len(user_ids))
+    logging.info("Telegram bot started with %d allowed users (public=%s)", len(user_ids), is_public)
     return bot
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+
+    # Log startup configuration
+    logger.info("=== Deye Dashboard starting ===")
+    logger.info("INVERTER_IP=%s  LOGGER_SERIAL=%s", INVERTER_IP, LOGGER_SERIAL)
+    logger.info("Inverter config: %s", inverter_config.to_dict())
+    logger.info("Generator: has_generator=%s fuel_rate=%s oil_change=%s",
+                inverter_config.has_generator, GENERATOR_FUEL_RATE, GENERATOR_OIL_CHANGE_DATE or "N/A")
+    logger.info("OUTAGE_PROVIDER=%s  OUTAGE_GROUP=%s", OUTAGE_PROVIDER_NAME, OUTAGE_GROUP)
+    logger.info("WEATHER coords: lat=%s lon=%s", WEATHER_LATITUDE, WEATHER_LONGITUDE)
+    telegram_enabled = os.environ.get("TELEGRAM_ENABLED", "true").lower() != "false"
+    telegram_token_set = bool(os.environ.get("TELEGRAM_BOT_TOKEN"))
+    logger.info("TELEGRAM: enabled=%s token_set=%s", telegram_enabled, telegram_token_set)
+
     # Flask debug reloader spawns two processes. Only start the bot once:
     # - If WERKZEUG_RUN_MAIN is set, we're in the reloader child — start bot
     # - If it's not set and use_reloader is False, start bot (no reloader)

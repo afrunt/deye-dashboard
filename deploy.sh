@@ -147,8 +147,8 @@ if [ ! -d ".git" ]; then
     git fetch --tags
     LATEST_TAG=\$(git tag --sort=-v:refname | head -1)
     if [ -n "\$LATEST_TAG" ]; then
-        echo "Checking out \$LATEST_TAG..."
-        git checkout "\$LATEST_TAG"
+        echo "Checking out \$LATEST_TAG (force — initial setup over rsync'd files)..."
+        git checkout -f "\$LATEST_TAG"
     fi
 else
     echo "Fetching latest tags..."
